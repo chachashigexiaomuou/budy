@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OpenCode Chat</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, sans-serif;
+      background: #f0f2f5;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    header {
+      background: #1a1a2e;
+      color: #fff;
+      padding: 14px 20px;
+      font-size: 1.1rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+
+    #messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .bubble {
+      max-width: 70%;
+      padding: 10px 14px;
+      border-radius: 16px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 0.95rem;
+    }
+
+    .bubble.user {
+      align-self: flex-end;
+      background: #4f46e5;
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+
+    .bubble.assistant {
+      align-self: flex-start;
+      background: #fff;
+      color: #1a1a2e;
+      border-bottom-left-radius: 4px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.1);
+    }
+
+    .bubble.error {
+      align-self: flex-start;
+      background: #fee2e2;
+      color: #991b1b;
+      border-bottom-left-radius: 4px;
+    }
+
+    .bubble.thinking {
+      align-self: flex-start;
+      background: #e5e7eb;
+      color: #6b7280;
+      font-style: italic;
+      border-bottom-left-radius: 4px;
+    }
+
+    #input-row {
+      display: flex;
+      gap: 8px;
+      padding: 14px 20px;
+      background: #fff;
+      border-top: 1px solid #e5e7eb;
+    }
+
+    #input-row textarea {
+      flex: 1;
+      resize: none;
+      border: 1px solid #d1d5db;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 0.95rem;
+      font-family: inherit;
+      outline: none;
+      line-height: 1.4;
+      height: 44px;
+      max-height: 140px;
+      overflow-y: auto;
+      transition: border-color .2s;
+    }
+
+    #input-row textarea:focus { border-color: #4f46e5; }
+
+    #send-btn {
+      background: #4f46e5;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      padding: 0 20px;
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: background .2s;
+      white-space: nowrap;
+    }
+
+    #send-btn:hover:not(:disabled) { background: #4338ca; }
+    #send-btn:disabled { background: #a5b4fc; cursor: not-allowed; }
+
+    #agent-select {
+      border: 1px solid #d1d5db;
+      border-radius: 10px;
+      padding: 0 12px;
+      font-size: 0.9rem;
+      font-family: inherit;
+      background: #f9fafb;
+      color: #1a1a2e;
+      height: 44px;
+      cursor: pointer;
+      outline: none;
+      transition: border-color .2s;
+    }
+    #agent-select:focus { border-color: #4f46e5; }
+
+    .permission-card {
+      align-self: flex-start;
+      background: #fffbeb;
+      border: 1px solid #fbbf24;
+      border-radius: 12px;
+      padding: 12px 16px;
+      max-width: 70%;
+      box-shadow: 0 1px 3px rgba(0,0,0,.1);
+    }
+
+    .permission-card .perm-title {
+      font-weight: 600;
+      font-size: 0.9rem;
+      color: #92400e;
+      margin-bottom: 4px;
+    }
+
+    .permission-card .perm-patterns {
+      font-family: monospace;
+      font-size: 0.85rem;
+      color: #1a1a2e;
+      background: #fef3c7;
+      border-radius: 6px;
+      padding: 4px 8px;
+      margin-bottom: 10px;
+      word-break: break-all;
+    }
+
+    .permission-card .perm-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .permission-card button {
+      border: none;
+      border-radius: 8px;
+      padding: 6px 16px;
+      font-size: 0.88rem;
+      cursor: pointer;
+      font-weight: 500;
+      transition: opacity .2s;
+    }
+
+    .permission-card button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .perm-allow { background: #22c55e; color: #fff; }
+    .perm-allow:hover:not(:disabled) { background: #16a34a; }
+    .perm-deny  { background: #ef4444; color: #fff; }
+    .perm-deny:hover:not(:disabled)  { background: #dc2626; }
+  </style>
+</head>
+<body>
+  <header>OpenCode Chat</header>
+  <div id="messages"></div>
+  <div id="input-row">
+    <select id="agent-select"><option value="">Default</option></select>
+    <textarea id="text-input" placeholder="输入消息，按 Enter 发送，Shift+Enter 换行" rows="1"></textarea>
+    <button id="send-btn">发送</button>
+  </div>
+
+  <script>
+    const messagesEl = document.getElementById('messages');
+    const inputEl = document.getElementById('text-input');
+    const sendBtn = document.getElementById('send-btn');
+    const agentSelect = document.getElementById('agent-select');
+
+    async function loadAgents() {
+      try {
+        const res = await fetch('/api/agents');
+        const agents = await res.json();
+        for (const a of agents) {
+          const opt = document.createElement('option');
+          opt.value = a.name;
+          opt.textContent = a.name + (a.description ? ` — ${a.description}` : '');
+          agentSelect.appendChild(opt);
+        }
+      } catch (e) {
+        console.warn('Failed to load agents:', e);
+      }
+    }
+    loadAgents();
+
+    function showPermissionCard(permId, tool, patterns) {
+      const card = document.createElement('div');
+      card.className = 'permission-card';
+      card.dataset.permId = permId;
+      card.innerHTML = `
+        <div class="perm-title">⚠ 权限请求：${tool}</div>
+        <div class="perm-patterns">${patterns.join(', ')}</div>
+        <div class="perm-actions">
+          <button class="perm-allow">Allow</button>
+          <button class="perm-deny">Deny</button>
+        </div>`;
+
+      const allowBtn = card.querySelector('.perm-allow');
+      const denyBtn  = card.querySelector('.perm-deny');
+
+      async function respond(action) {
+        allowBtn.disabled = true;
+        denyBtn.disabled  = true;
+        try {
+          await fetch('/api/permission', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ permission_id: permId, action }),
+          });
+        } catch (e) {
+          console.error('Permission response failed:', e);
+        }
+        card.querySelector('.perm-actions').innerHTML =
+          `<span style="font-size:.85rem;color:#6b7280">${action === 'reject' ? 'Denied' : 'Allowed'}</span>`;
+      }
+
+      allowBtn.addEventListener('click', () => respond('once'));
+      denyBtn.addEventListener('click',  () => respond('reject'));
+
+      messagesEl.appendChild(card);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function addBubble(text, role) {
+      const div = document.createElement('div');
+      div.className = `bubble ${role}`;
+      div.textContent = text;
+      messagesEl.appendChild(div);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      return div;
+    }
+
+    async function sendMessage() {
+      const text = inputEl.value.trim();
+      if (!text) return;
+
+      const selectedAgent = agentSelect.value || null;
+
+      inputEl.value = '';
+      inputEl.style.height = '44px';
+      sendBtn.disabled = true;
+
+      addBubble(text, 'user');
+      const assistantBubble = addBubble('', 'assistant');
+
+      try {
+        const body = { text };
+        if (selectedAgent) body.agent = selectedAgent;
+
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buf += decoder.decode(value, { stream: true });
+          const parts = buf.split('\n\n');
+          buf = parts.pop();
+
+          for (const part of parts) {
+            const line = part.trim();
+            if (!line.startsWith('data:')) continue;
+            const json = line.slice('data:'.length).trim();
+            if (!json) continue;
+            const event = JSON.parse(json);
+            if (event.type === 'delta') {
+              assistantBubble.textContent += event.content;
+              messagesEl.scrollTop = messagesEl.scrollHeight;
+            } else if (event.type === 'permission') {
+              showPermissionCard(event.id, event.tool, event.patterns);
+            } else if (event.type === 'done') {
+              break;
+            }
+          }
+        }
+
+        if (!assistantBubble.textContent) {
+          assistantBubble.remove();
+          addBubble('（无回复）', 'error');
+        }
+      } catch (err) {
+        assistantBubble.remove();
+        addBubble('网络错误：' + err.message, 'error');
+      } finally {
+        sendBtn.disabled = false;
+        inputEl.focus();
+      }
+    }
+
+    sendBtn.addEventListener('click', sendMessage);
+
+    inputEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    // Auto-grow textarea
+    inputEl.addEventListener('input', () => {
+      inputEl.style.height = '44px';
+      inputEl.style.height = Math.min(inputEl.scrollHeight, 140) + 'px';
+    });
+  </script>
+</body>
+</html>
